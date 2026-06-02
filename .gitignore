@@ -1,0 +1,26 @@
+# --- Data: commit compressed .csv.gz, ignore the large raw .csv ---
+data/raw/*.csv
+data/fpca_processed/*.csv
+# (keep .csv.gz and station_info/)
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.ipynb_checkpoints/
+.venv/
+venv/
+
+# --- Large / generated artifacts (curate before adding) ---
+*.pptx
+code/models/daily_plots/
+code/models/diagnostic_plots/
+code/models/residual_plots/
+code/models/residual_plots_v2/
+code/models/daily_station_residuals/
+code/models/year_long_plots/
+
+# --- OS / editor ---
+.DS_Store
+Thumbs.db
+.claude/
