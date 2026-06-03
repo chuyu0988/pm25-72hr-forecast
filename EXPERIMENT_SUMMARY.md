@@ -96,16 +96,16 @@
 
 ## 🧪 輸入前處理實驗（已收斂，皆不採用）
 
-| 實驗 | 腳本 | NCU-RMSE | Δ | 結論 |
-|---|---|---|---|---|
-| min-max 正規化[0,1] | `exp_minmax_norm.py` | 7.5505 | +0.226 | ❌ 變差；原始資料有壞值(PM2.5負、RH>100、TEMP-135)撐爆範圍 |
-| 經緯度平移到原點(SW=0,0) | `exp_coord_origin.py` | 7.3234 | −0.002 | ➖ 雜訊內，無害、較乾淨 |
+| 實驗 | NCU-RMSE | Δ | 結論 |
+|---|---|---|---|
+| min-max 正規化[0,1] | 7.5505 | +0.226 | ❌ 變差；原始資料有壞值(PM2.5負、RH>100、TEMP-135)撐爆範圍 |
+| 經緯度平移到原點(SW=0,0) | 7.3234 | −0.002 | ➖ 雜訊內，無害、較乾淨 |
 
 → 輸入縮放/平移動不了指標；瓶頸是**資料的訊息含量**，非輸入尺度。
 
 ---
 
-## 🔬 殘差分析（`daily_station_residual_analysis.py`）
+## 🔬 殘差分析（每站每天）
 
 誤差非均勻分布，集中在兩個維度的交集：
 - **冬季（1-2月）區域傳輸事件**：同一天西部多站一起爆、且**系統性低估尖峰**（bias −15~−26）。
@@ -135,15 +135,9 @@ code/
     ├── exp_raw_input.py                 # ★ 正式模型 (7.3250 / MAE 5.27)
     ├── exp_simple_baselines.py          # persistence / climatology / Ridge
     ├── exp_fda_baselines.py             # FLM / FAM / FoFGPR（依投影片公式）
-    ├── exp_deeponet_baselines_v2.py     # 原始 DeepONet & FEDONet（joint + per-station）
-    ├── exp_deeponet_baselines.py        # (v1，過擬合，僅留參考)
-    ├── exp_deeponet_per_station.py      # (v1 per-station，過擬合，僅留參考)
-    ├── exp_minmax_norm.py               # 前處理實驗：min-max
-    ├── exp_coord_origin.py              # 前處理實驗：座標平移
-    ├── daily_station_residual_analysis.py  # 每站每天殘差分析
-    ├── Station-independent_deeponet.ipynb / my_Modified_deeponet.ipynb  # 原始 notebook
-    └── run_pffr.R
+    └── exp_deeponet_baselines_v2.py     # 原始 DeepONet & FEDONet（joint + per-station）
 ```
+> 表格以外的探索性腳本（前處理、殘差分析、v1 過擬合版、原始 notebook 等）僅保留於本機，未納入此 repo。
 
 **執行**：
 ```bash
