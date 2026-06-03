@@ -62,15 +62,15 @@ the input CSV filename changes). Uses R `fdapace::FPCA`.
 
 ---
 
-## 4. Baseline model (`code/models/exp_raw_input.py`)
+## 4. Best model (`code/models/exp_best.py`)
 
 FEDONet (Fourier-enhanced DeepONet) with a **station embedding** (the key
-ingredient) + temporal features.
+ingredient) + a month seasonal feature.
 
-- Branch: 122-d input + station-embed(32) + temporal(4) → 512→256→128→p
+- Branch: 122-d input + station-embed(32) + temporal(2) → 512→256→128→p
 - Trunk: Fourier features (`m=64`) → 128 → p
-- Temporal: `month`, `weekday` as sin/cos (4 dims). The `hour` feature is omitted
-  on purpose — with step=24 every window starts at 00:00, so it is constant.
+- Temporal: **`month` sin/cos only (2 dims)**. Weekday was dropped — verified across
+  seeds 42/123/777 to consistently lower RMSE. `hour` is constant (step=24) so omitted.
 - Train: full-batch, AdamW (lr=1e-3, wd=1e-2), CosineAnnealingLR, 2000 epochs.
 - **Single model** (no ensemble).
 
@@ -78,7 +78,8 @@ ingredient) + temporal features.
 
 | Model | File | NCU-style RMSE | MAE |
 |---|---|---|---|
-| **Our model** (multi-var + station embed + temporal) | `exp_raw_input.py` | **7.3250** | **5.2707** |
+| **Our model** (multi-var + station embed + month) | `exp_best.py` | **7.2931** | **5.2463** |
+| previous (with weekday) | `exp_raw_input.py` | 7.3250 | 5.2707 |
 | SOTA reference — CNN-BASE (**uses WRF-CMAQ** forecasts) | Lee et al. 2024 | 6.88 | — |
 
 > ⚠️ The SOTA 6.88 is **not** an apples-to-apples target: that CNN ingests
@@ -103,7 +104,7 @@ same NCU-style metric, so they are directly comparable.
 | operator | DeepONet — per-station (71 models) | `exp_deeponet_baselines_v2.py` | 8.05 | 5.82 |
 | operator | DeepONet — joint (Lu 2021) | `exp_deeponet_baselines_v2.py` | 7.83 | 5.75 |
 | operator | FEDONet — joint (Sojitra 2025, frozen Fourier trunk) | `exp_deeponet_baselines_v2.py` | 7.81 | 5.74 |
-| **ours** | **conditioned multi-input FEDONet** | `exp_raw_input.py` | **7.3250** | **5.27** |
+| **ours** | **conditioned multi-input FEDONet** (month-only) | `exp_best.py` | **7.2931** | **5.25** |
 
 **Takeaway.** Every *single-PM2.5-input* method — linear (Ridge/FLM), nonlinear FDA
 (FAM), Gaussian process (FoFGPR), and the vanilla/Fourier DeepONets — plateaus at
@@ -120,7 +121,7 @@ Full details, ablations, residual analysis, and the methodology/leakage audit:
 
 ```bash
 gunzip -k data/raw/*.csv.gz data/fpca_processed/*.csv.gz
-python code/models/exp_raw_input.py
+python code/models/exp_best.py
 ```
 
 Requires PyTorch (CUDA optional). FPCA preprocessing requires R + `fdapace`.

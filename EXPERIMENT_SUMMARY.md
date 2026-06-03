@@ -82,8 +82,13 @@
 
 | 模型 | 腳本 | NCU-RMSE | MAE | 分時段(1-12/13-24/25-48/49-72) |
 |---|---|---|---|---|
-| **本模型（多變數+station embed+temporal）** | `code/models/exp_raw_input.py` | **7.3250** | **5.2707** | 5.89 / 6.98 / 7.62 / 7.92 |
+| **本模型（多變數+station embed+month）** | `code/models/exp_best.py` | **7.2931** | **5.2463** | 5.87 / 6.98 / 7.58 / 7.88 |
+| 前一版（含 weekday）| `code/models/exp_raw_input.py` | 7.3250 | 5.2707 | 5.89 / 6.98 / 7.62 / 7.92 |
 | SOTA CNN-BASE（用 CMAQ）| Lee et al. 2024 | 6.88 | — | — |
+
+> 最佳 = `exp_best.py`：temporal **只用 month sin/cos（拿掉 weekday）**、**保留 lat/lon**。
+> 7.2931 為 seed=42（與含 weekday 版同 seed 公平對照 7.3250）。「拿掉 weekday、保留 lat/lon」
+> 兩項決定均經多 seed (42/123/777) 驗證為穩定方向。
 
 ---
 
@@ -149,7 +154,8 @@
 code/
 ├── fpca/pm25_fpca_2018~2024_2025.R     # FPCA 補值（5 變數共用，僅換檔名）
 └── models/
-    ├── exp_raw_input.py                 # ★ 正式模型 (7.3250 / MAE 5.27)
+    ├── exp_best.py                      # ★ 最佳模型 (month-only; 7.2931 / MAE 5.25)
+    ├── exp_raw_input.py                 # 前一版 (含 weekday; 7.3250 / MAE 5.27)
     ├── exp_simple_baselines.py          # persistence / climatology / Ridge
     ├── exp_fda_baselines.py             # FLM / FAM / FoFGPR（依投影片公式）
     ├── exp_deeponet_baselines_v2.py     # 原始 DeepONet & FEDONet（joint + per-station）
