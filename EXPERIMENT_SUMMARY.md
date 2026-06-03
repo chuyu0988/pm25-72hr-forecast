@@ -59,6 +59,23 @@
 - **測試目標純 raw**（不碰 FPCA）→ 7.3250 為誠實指標。
 - 已知小瑕疵：train/test 邊界缺 purge gap，最後一個訓練窗 label 落在 2025-01-01~03（影響前 ~3 天，量級可忽略，未修）。
 
+### FPCA 重建誤差（各變數）— `exp_fpca_recon_error.py`
+在「有真實觀測的格子」上比較 raw vs FPCA 重建值。nRMSE = RMSE/std（跨變數可比，越低越好）。
+
+| 變數 | RMSE | MAE | corr | std | **nRMSE** | test RMSE |
+|---|---|---|---|---|---|---|
+| AMB_TEMP | 0.347 °C | 0.236 | 0.998 | 5.54 | **0.063** | 0.340 |
+| RH | 1.744 % | 1.200 | 0.992 | 13.50 | **0.129** | 1.827 |
+| PM2.5 | 2.717 µg/m³ | 1.877 | 0.973 | 11.68 | **0.233** | 2.508 |
+| WIND_V | 0.555 m/s | 0.397 | 0.960 | 1.97 | **0.282** | 0.557 |
+| WIND_U | 0.552 m/s | 0.397 | 0.951 | 1.78 | **0.309** | 0.551 |
+
+判讀：
+- 重建品質：**溫度 ≫ 濕度 ≫ PM2.5 ≫ 風速**（溫濕度平滑、強日週期 → 幾乎完美；風場噪訊多、日週期弱 → 最難）。
+- **train ≈ test**：每變數 test 誤差與 train 幾乎相同 → 訓練年基底投影到 2025 無退化，再證 FPCA 無洩漏、泛化良好。
+- **對模型影響有限**：模型僅在缺值（~1.3% 目標、~2% 輸入）才用 FPCA 補，98% 是 raw。
+- 此為**下界**：誤差量在「有觀測」的格子；實際要補的「完全缺失」格子更難重建、誤差可能更高（無 ground truth 不可測），風場缺值填補最不可靠。
+
 ---
 
 ## 🏆 主結果
@@ -135,9 +152,10 @@ code/
     ├── exp_raw_input.py                 # ★ 正式模型 (7.3250 / MAE 5.27)
     ├── exp_simple_baselines.py          # persistence / climatology / Ridge
     ├── exp_fda_baselines.py             # FLM / FAM / FoFGPR（依投影片公式）
-    └── exp_deeponet_baselines_v2.py     # 原始 DeepONet & FEDONet（joint + per-station）
+    ├── exp_deeponet_baselines_v2.py     # 原始 DeepONet & FEDONet（joint + per-station）
+    └── exp_fpca_recon_error.py          # FPCA 各變數重建誤差診斷
 ```
-> 表格以外的探索性腳本（前處理、殘差分析、v1 過擬合版、原始 notebook 等）僅保留於本機，未納入此 repo。
+> 表格以外的探索性腳本（前處理、位置 ablation、殘差分析、v1 過擬合版、原始 notebook 等）僅保留於本機，未納入此 repo。
 
 **執行**：
 ```bash
