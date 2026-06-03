@@ -270,7 +270,7 @@ with torch.no_grad():
     pred = model(test_x_t, test_sid_t, test_temp_t).cpu().numpy()
 
 # ============================================================
-# EVALUATION — NCU-style RMSE only
+# EVALUATION — NCU-style RMSE + MAE + segment RMSE
 # ============================================================
 mask_all = ~np.isnan(all_test_y_raw)
 ncu_hourly = []
@@ -278,10 +278,20 @@ for h in range(72):
     m = mask_all[:, h]
     if m.sum() > 0:
         ncu_hourly.append(np.sqrt(np.mean((all_test_y_raw[:, h][m] - pred[:, h][m]) ** 2)))
-ncu_rmse = np.mean(ncu_hourly)
+ncu_hourly = np.array(ncu_hourly)
+ncu_rmse = float(ncu_hourly.mean())
 
-print(f"\n{'='*60}\nRESULT (NCU-style RMSE only)\n{'='*60}")
+# overall MAE (pooled over all valid (sample,hour))
+res = pred[mask_all] - all_test_y_raw[mask_all]
+mae = float(np.mean(np.abs(res)))
+seg = {"1-12hr": (0, 12), "13-24hr": (12, 24), "25-48hr": (24, 48), "49-72hr": (48, 72)}
+
+print(f"\n{'='*60}\nRESULT (my model — exp_raw_input)\n{'='*60}")
 print(f"NCU-style RMSE (hourly-pooled, avg over 72h): {ncu_rmse:.4f}")
+print(f"Overall MAE:                                  {mae:.4f}")
+print("Segment RMSE (avg of per-hour pooled RMSE):")
+for name, (a, b) in seg.items():
+    print(f"  {name:9s}: {ncu_hourly[a:b].mean():.4f}")
 print(f"  vs raw-input-off baseline (FPCA inputs): 7.3017")
 print(f"  vs SOTA target: 6.88")
 print("\nDone!")

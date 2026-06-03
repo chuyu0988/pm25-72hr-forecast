@@ -76,14 +76,43 @@ ingredient) + temporal features.
 
 ### Result
 
-| Version | File | Input | Target | NCU-style RMSE |
-|---|---|---|---|---|
-| **Official baseline** | `exp_raw_input.py` | raw | raw | **7.3250** |
-| FPCA input + raw target | `exp_raw_target.py` | FPCA | raw | 7.3017 |
-| SOTA reference (uses CMAQ) | — | — | — | 6.88 |
+| Model | File | NCU-style RMSE | MAE |
+|---|---|---|---|
+| **Our model** (multi-var + station embed + temporal) | `exp_raw_input.py` | **7.3250** | **5.2707** |
+| SOTA reference — CNN-BASE (**uses WRF-CMAQ** forecasts) | Lee et al. 2024 | 6.88 | — |
 
-See `EXPERIMENT_SUMMARY.md` for the full methodology notes, leakage audit, and the
-list of explored / failed directions.
+> ⚠️ The SOTA 6.88 is **not** an apples-to-apples target: that CNN ingests
+> WRF-CMAQ physical forecasts as input (the CMAQ system alone is RMSE 10.48), and
+> is evaluated on a different period/stations. Our model uses **pure observations**.
+
+---
+
+## 4b. Baselines & comparison (`code/models/`, `NEW_EXPERIMENTS_LOG.md`)
+
+All baselines run on the **identical** 71-station / 23,189-window test set with the
+same NCU-style metric, so they are directly comparable.
+
+| Family | Method | Script | NCU-RMSE | MAE |
+|---|---|---|---|---|
+| trivial | Diurnal persistence | `exp_simple_baselines.py` | 9.93 | 7.06 |
+| trivial | Persistence | `exp_simple_baselines.py` | 9.37 | 6.65 |
+| statistical | Climatology (station×month×hour) | `exp_simple_baselines.py` | 8.39 | 6.43 |
+| GP / FDA | FoFGPR (FPCA scores + SE-kernel GP) | `exp_fda_baselines.py` | 8.18 | 5.99 |
+| linear / FDA | Ridge = **FLM** (function-on-function linear) | `exp_simple_baselines.py` / `exp_fda_baselines.py` | 7.85 | 5.82 |
+| FDA | FAM (functional additive) | `exp_fda_baselines.py` | 7.88 | 5.82 |
+| operator | DeepONet — per-station (71 models) | `exp_deeponet_baselines_v2.py` | 8.05 | 5.82 |
+| operator | DeepONet — joint (Lu 2021) | `exp_deeponet_baselines_v2.py` | 7.83 | 5.75 |
+| operator | FEDONet — joint (Sojitra 2025, frozen Fourier trunk) | `exp_deeponet_baselines_v2.py` | 7.81 | 5.74 |
+| **ours** | **conditioned multi-input FEDONet** | `exp_raw_input.py` | **7.3250** | **5.27** |
+
+**Takeaway.** Every *single-PM2.5-input* method — linear (Ridge/FLM), nonlinear FDA
+(FAM), Gaussian process (FoFGPR), and the vanilla/Fourier DeepONets — plateaus at
+**7.8–8.2**. The gain to 7.33 comes from **multi-variable input + station
+conditioning**, not from the operator architecture itself (FLM ≡ Ridge ≡ DeepONet
+≈ 7.85 on single PM2.5 input).
+
+Full details, ablations, residual analysis, and the methodology/leakage audit:
+**`NEW_EXPERIMENTS_LOG.md`** (and `EXPERIMENT_SUMMARY.md`).
 
 ---
 

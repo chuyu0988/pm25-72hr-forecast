@@ -24,3 +24,9 @@ code/models/year_long_plots/
 .DS_Store
 Thumbs.db
 .claude/
+
+# --- Reference papers (copyright; do not redistribute) ---
+paper/
+
+# --- Archived / superseded experiment scripts (kept locally only) ---
+code/models/_archive/
