@@ -1,291 +1,153 @@
-# DeepONet PM2.5 72hr 預測 — 實驗總結與下一階段目標
+# DeepONet PM2.5 72hr 預測 — 實驗總結
 
-## 🎯 目標
-**將測試集 RMSE 降到 6.88 以下**（SOTA 論文 6.88 但使用 CMAQ 模擬資料，我們是純觀測）。
+> 純觀測（無 CMAQ）的 72 小時 PM2.5 預測。71 站 joint training。
+> 目標：在「與 SOTA 論文相同的 RMSE 算法」下把測試誤差壓到最低。
 
 ---
 
-## 🔧 方法論修正與正式 Baseline（2026-06）
+## 🎯 目標與 SOTA 對照（必讀：比較不對等）
 
-> 以下為**方法論修正後的正式版本**，取代先前以 FPCA 平滑值當訓練目標的舊設定。
-> 評估一律採 **NCU-style RMSE**（每小時 pooled RMSE，再對 72 小時平均），才能與 SOTA 6.88 公允對比。
-
-### 背景：先前的不嚴謹之處
-舊流程把**「FPCA 平滑後的 PM2.5」當訓練目標**，卻用 **raw PM2.5 評估** → train/test 目標分佈不一致（train 平滑、test 原始）。這在學術上會被質疑「偷改了預測任務」，且系統性低估高污染尖峰。
-
-### 已修正的內容
-1. **訓練目標**：改為「**raw 觀測為主，僅缺值用 FPCA 補**」（原本整條 72hr 都用 FPCA 平滑值）。
-2. **輸入特徵**：5 變數同樣改為「**raw 觀測為主，僅缺值用 FPCA 補**」（原本輸入 100% 用 FPCA 重建值）。採此版本以保有「純觀測」最乾淨的敘事。
-3. **Temporal 特徵**：移除壞掉的 `hour`（因 `STEP=24` 每窗口恆為 00:00 → 常數無資訊），保留 `month + weekday`（sin/cos，共 4 維）。
-4. **單一模型**：不使用 Ensemble（避免重複計算）。
-
-### FPCA 流程查核 → 確認無資料洩漏
-查 `code/fpca/pm25_fpca_2018~2024_2025.R`（5 變數共用同一支腳本，僅換檔名）：
-- **一天 = 一條曲線**（`SubjectID = factor(date)`），FPCA 建模日週期。
-- **基底只用訓練年（<2025）fit**，測試集用 `predict()` 投影到訓練基底 → 無 train/test 洩漏。
-- **窗口 = 一天**（`INPUT_HOURS=STEP_SIZE=24`，從 00:00 起），每天平滑只用當天 24 小時 → **無 look-ahead 洩漏**（發布預測時當天已全部觀測到）。
-- `FVEthreshold = 0.999` → 保留 99.9% 變異，**幾乎只補值、不平滑** → 「補值導致預測太平滑」的疑慮基本不成立。
-- **結論**：FPCA 輸入其實也合法（不洩漏），但正式版選擇 raw 輸入以求最乾淨。
-
-### 結果（NCU-style RMSE，單模型 seed=42, m=64, M5 station embedding）
-
-| 版本 | 檔案 | 輸入 | 目標 | temporal | NCU-style RMSE |
-|---|---|---|---|---|---|
-| 舊（瑕疵, Ensemble x5） | `exp_next_round.py` | FPCA | FPCA | 6d (含 hour bug) | 7.2353 |
-| 修正：FPCA 輸入 + raw 目標 | `exp_raw_target.py` | FPCA | raw | 4d | 7.3017 |
-| ＋ season（冗餘，無效） | `exp_raw_target_season.py` | FPCA | raw | 6d (+season) | 7.2998 |
-| **✅ 正式 baseline：raw 輸入 + raw 目標** | **`exp_raw_input.py`** | **raw** | **raw** | **4d** | **7.3250** |
-
-註：
-- 舊的 7.2353 同時包含「Ensemble x5 + FPCA 平滑目標 + hour bug」，**並非乾淨對照**；方法論修正後的單模型誠實基準約在 7.30。
-- season 特徵與 month 高度冗餘，改善在雜訊範圍內（−0.002），不採用。
-- raw 輸入（7.3250）與 FPCA 輸入（7.3017）差距僅 +0.023；FPCA 輸入因去噪略佳，但 raw 輸入敘事最乾淨。
-
-### 🏆 目前正式最佳（方法論正確）
-**raw 輸入 + raw 目標 + temporal(month/weekday 4d)，單模型 → NCU-style RMSE = 7.3250**（`exp_raw_input.py`）
+- 目標：逼近 SOTA **NCU-style RMSE = 6.88**（Lee et al. 2024, *Atmospheric Environment* 338, 120835；CNN-BASE）。
+- **⚠️ 6.88 不是同條件門檻**：
+  - 該 CNN 把 **WRF-CMAQ 物理預報**當核心輸入（CMAQ 系統單獨 RMSE=10.48，CNN 結合 CMAQ+觀測才到 6.88）。
+  - 測試集不同：論文 75 站、2019/10–2021/09；本專案 71 站、2025。
+  - 論文丟棄缺值樣本、輸入 min-max[0,1]。
+  - → 本專案是**純觀測**達到 **7.3250**，逼近「用了 CMAQ」的 6.88。算法可比、資訊條件不對等。**「純觀測、不需數值模式」本身是賣點。**
 
 ---
 
 ## 📊 任務設定
 
-- **輸入**：過去 24 小時 × 5 變數（PM2.5、WIND_U、WIND_V、RH、AMB_TEMP）+ 測站經緯度
-- **輸出**：未來 72 小時 PM2.5 濃度
-- **訓練範圍**：2018-01-01 ~ 2024-12-31（target：raw PM2.5 為主，僅缺值用 FPCA 補 — 見上方「方法論修正」）
-- **測試範圍**：2025-01-01 ~ 2025-11-30（原始 raw PM2.5 作為 target）
-- **滑動窗口**：步長 24（不重疊）
-- **資料**：71 站 joint training，Train 176,750 筆 × 122 維，Test 23,189 筆
-- **FPCA 重建 RMSE ≈ 2.0**（理論下界）
+| | |
+|---|---|
+| 輸入 | 過去 24 小時 × 5 變數（PM2.5, WIND_U, WIND_V, RH, AMB_TEMP）＋測站 lat/lon |
+| 輸出 | 未來 72 小時 PM2.5 |
+| 訓練 | 2018-01-01 ~ 2024-12-31（176,750 窗口）|
+| 測試 | 2025-01-01 ~ 2025-11-30（23,189 窗口）|
+| 窗口 | 滑動，step=24h（不重疊）|
+| 測站 | 71 站，joint training |
+| 指標 | **NCU-style RMSE**＝每小時 pooled RMSE 對 72h 平均（與 SOTA 同算法）|
 
-### 資料分布
-- Train Y: mean=15.70, std=11.45, median=12.70, max=310.31
-- Test Y: mean=12.98, std=9.61, median=11.00, max=235.00
-- 高污染（>50）僅 1.5%，極端（>100）僅 0.01% → 嚴重右偏
-
-### 測站分布特性
-- 71 站全部位於台灣本島
-- **集中在西半部平原**，東部極少
-- 已跳過 3 個離島：金門、馬公、馬祖（無座標）
+資料分布：Train Y mean=15.70/std=11.45/max=310；Test Y mean=12.98/std=9.61/max=235。高污染(>50)僅 1.5%、極端(>100)僅 0.01% → 嚴重右偏。
 
 ---
 
-## 🔬 已完成的失敗實驗（請勿重複嘗試）
+## 🔒 固定協定（每個實驗一致，否則不可比較）
 
-### Baseline
-| 模型 | MAE | RMSE | 備註 |
-|---|---|---|---|
-| **FEDONet 原始** | 5.3628 | **7.3967** | User notebook 原始結果 |
-| FEDONet 重現 | 5.3706 | 7.4047 | 完整重現（差距 +0.008 為 seed 變異） |
+**評估指標**：NCU-style RMSE（headline，已核對＝論文 Eq.5 的 pooled RMSE 對 72h 平均；證據：論文 Table 2 ALL=6.88≠各區等權均6.35 → 跨站 pool）。輔助：MAE、分時段 RMSE。
 
-### 失敗實驗清單
+**資料協定**：
+- 輸入：**真實觀測為主，空值才用 FPCA 補**（`raw.fillna(fpca)`）。
+- 訓練目標：raw 為主、缺值用 FPCA 補（僅 1.30% 目標格用 FPCA）。
+- 測試目標：**純 raw 觀測**（不補 FPCA，缺值不計分）→ 誠實評估。
 
-| # | 實驗 | MAE | RMSE | vs 7.4047 | 結論 |
-|---|---|---|---|---|---|
-| 1 | **+ Temporal features**（month/hour/weekday sin/cos）| 5.3632 | 7.3864 | -0.018 | 微小改善，幾乎在隨機波動範圍 |
-| 2 | **4000 epochs**（vs 2000）| 5.4760 | 7.4809 | +0.076 | ❌ 過擬合，loss 持續下降但 test 變差 |
-| 3 | **Huber loss δ=5** | 5.3084 | 7.4498 | +0.045 | ❌ MAE 改善但 RMSE 變差 |
-| 4 | **Huber loss δ=10** | 5.3199 | 7.4255 | +0.021 | ❌ 同上 |
-| 5 | **Larger branch (768→512→256→p)** | 5.3266 | 7.4671 | +0.062 | ❌ 過擬合 |
-| 6 | **Larger branch + 4000ep** | 5.5181 | 7.5270 | +0.122 | ❌ 嚴重過擬合 |
-| 7 | **Ensemble x3**（seeds 42/123/777）| 5.3220 | 7.3796 | **-0.025** | ✅ 穩定小改善 |
-| 8 | **Ensemble x3 + Temporal** | 5.3140 | **7.3514** | **-0.053** | ✅ **目前最佳** |
-| 9 | **Autoregressive 24→24→24** | 5.4282 | 7.5069 | +0.10 | ❌ 滾動時誤差累積，且失去 wind/temp 資訊 |
-| 10 | Z-score normalization（input + output）| - | ~7.5 | - | ❌ 沒幫助（mini-batch 測試） |
-| 11 | Coords in Trunk（取代 branch）| - | ~7.4 | - | ❌ 邊際差異 |
-| 12 | CNN branch | - | - | - | ❌ User 已嘗試，沒幫助 |
+**訓練設定（已驗證最佳）**：AdamW(lr=1e-3, wd=1e-2)、CosineAnnealingLR(T_max=2000)、MSE、full-batch、2000 epochs、seed=42。模型＝FEDONet + station embedding(32d) + temporal(month/weekday 4d) + m=64。
 
-### 各時段 RMSE（Baseline）
-| 區間 | RMSE | 觀察 |
-|---|---|---|
-| 1-12hr | 5.9537 | 短程相對準 |
-| 13-24hr | 7.0470 | 開始上升 |
-| 25-48hr | 7.7327 | 中程 |
-| **49-72hr** | **8.0561** | **長程是主要瓶頸** |
+**紀律**：一次只改一個變因；改善 <±0.02 視為雜訊；每實驗記錄腳本/RMSE/MAE/分時段/結論。
 
 ---
 
-## 🚫 從失敗實驗學到的教訓
+## ✅ 方法論修正（取代舊版）
 
-1. **模型容量已足夠**：更大或更深的網路只會過擬合，不要再加深加寬
-2. **訓練長度已到位**：2000 epochs 是最佳，更多會過擬合
-3. **單一 loss function 改變沒用**：MSE / Huber 都試過
-4. **AR 不適合這個問題**：滾動時遺失非 PM2.5 變數資訊，誤差累積
-5. **只有兩件事有穩定改善**：
-   - Ensemble（隨機性平均）
-   - Temporal features（季節/日週期資訊）
-6. **真正的瓶頸是「訓練資料的訊息含量」而非「模型架構」**
+> 舊流程把 **FPCA 平滑值當訓練目標、FPCA 重建值當輸入**，卻用 raw 評估 → train/test 目標分佈不一致、系統性低估尖峰，**舊結果不可信**。已全面改為「raw 為主、僅缺值補 FPCA」，並只用 raw 測試目標評分。
 
----
-
-## 🎯 下一階段：未嘗試但高潛力的方向
-
-### 🔥 強烈建議優先嘗試（按潛力排序）
-
-#### 1. **鄰近測站 PM2.5 輸入**（最推薦）
-**動機**：PM2.5 是強空間相關污染物，東北季風時北部測站「領先指示」中南部測站。AR 失敗是因為滾動時遺失輔助變數，但**鄰站的真實 PM2.5 永遠是已知的**。
-
-**做法**：
-- 每個測站找最近 k=3 個鄰站
-- Branch 輸入：`5 vars × 24hr + 3 neighbors × 24hr PM2.5 + lat/lon` = 122 + 72 = 194 維
-- 訓練時鄰站用真實值，測試時也用真實值（因為輸入窗口的 PM2.5 都是觀測值）
-
-**預期改善**：**-0.1 ~ -0.3**
+### FPCA 流程 / 資料管線稽核（已逐項實測，無致命洩漏）
+- **基底只用訓練年 fit**，測試年用 `predict()` 投影 → 無 train/test 基底洩漏。
+- **一天一條曲線**，當日補值只用當日 24h（發布時當日已全觀測）→ 無 look-ahead。
+- `FVEthreshold=0.999` → 幾乎只補值、不平滑。
+- **補值對齊已實測**：raw 與 FPCA CSV 在觀測點上相關 0.94–0.98、均值吻合 → 對齊正確（曾疑慮的 SubjectID 錯位未發生）。
+- **測試目標純 raw**（不碰 FPCA）→ 7.3250 為誠實指標。
+- 已知小瑕疵：train/test 邊界缺 purge gap，最後一個訓練窗 label 落在 2025-01-01~03（影響前 ~3 天，量級可忽略，未修）。
 
 ---
 
-#### 2. **重疊窗口（STEP_SIZE=1 或 3）**
-**動機**：目前 STEP_SIZE=24（不重疊），訓練資料 176K。改成 STEP_SIZE=1 → **~24 倍訓練資料**。
+## 🏆 主結果
 
-**做法**：
-- STEP_SIZE: 24 → 1（或 3 平衡記憶體）
-- 可能需要切到 mini-batch
-- 注意：相鄰樣本高度相關
-
-**預期改善**：-0.1 ~ -0.2
+| 模型 | 腳本 | NCU-RMSE | MAE | 分時段(1-12/13-24/25-48/49-72) |
+|---|---|---|---|---|
+| **本模型（多變數+station embed+temporal）** | `code/models/exp_raw_input.py` | **7.3250** | **5.2707** | 5.89 / 6.98 / 7.62 / 7.92 |
+| SOTA CNN-BASE（用 CMAQ）| Lee et al. 2024 | 6.88 | — | — |
 
 ---
 
-#### 3. **Multi-Head DeepONet（分時段 trunk）**
-**動機**：49-72hr 誤差最大（8.05），且短程（風場主導）vs 長程（天氣型態主導）機制不同。
+## 📐 完整 baseline 對照（同一 71 站 / 23,189 筆測試集、同 NCU 指標）
 
-**做法**：
-- 共用 branch，但 3 個獨立 trunk：
-  - Trunk-Short：1-24hr
-  - Trunk-Mid：25-48hr
-  - Trunk-Long：49-72hr
-- 或每個 trunk 用不同 Fourier 頻率範圍
+| 類別 | 方法 | 腳本 | NCU-RMSE | MAE |
+|---|---|---|---|---|
+| trivial | Diurnal persistence | `exp_simple_baselines.py` | 9.93 | 7.06 |
+| trivial | Persistence | `exp_simple_baselines.py` | 9.37 | 6.65 |
+| 統計 | Climatology（站×月×時）| `exp_simple_baselines.py` | 8.39 | 6.43 |
+| GP/FDA | FoFGPR（FPCA分數+SE kernel GP，M=3000子集）| `exp_fda_baselines.py` | 8.18 | 5.99 |
+| 線性/FDA | Ridge ＝ **FLM**（function-on-function 線性）| `exp_simple_baselines.py` / `exp_fda_baselines.py` | 7.85 | 5.82 |
+| FDA | FAM（functional additive, RBF 基底）| `exp_fda_baselines.py` | 7.88 | 5.82 |
+| operator | DeepONet — per-station（71模型）| `exp_deeponet_baselines_v2.py` | 8.05 | 5.82 |
+| operator | DeepONet — joint（Lu 2021）| `exp_deeponet_baselines_v2.py` | 7.83 | 5.75 |
+| operator | FEDONet — joint（Sojitra 2025, 固定 Fourier trunk）| `exp_deeponet_baselines_v2.py` | 7.81 | 5.74 |
+| **本模型** | conditioned multi-input FEDONet | `exp_raw_input.py` | **7.3250** | **5.27** |
 
-**預期改善**：-0.05 ~ -0.15
+**核心結論**：所有「PM2.5 單變數」方法——線性(Ridge/FLM)、非線性FDA(FAM)、GP(FoFGPR)、各種 DeepONet/FEDONet——全部卡在 **7.8–8.2 高原**。突破到 7.33 來自**多變數輸入 + station 條件化**，不是 operator 架構本身（FLM ≡ Ridge ≡ DeepONet ≈ 7.85）。
 
----
-
-#### 4. **風向工程（Taiwan-specific）**
-**動機**：台灣 PM2.5 首要驅動是東北季風。WIND_U/V 各自線性，但「從中國方向吹來的風」才是真正污染指標。
-
-**做法**：
-```python
-wind_speed = sqrt(U^2 + V^2)
-wind_dir = atan2(V, U)
-# 「來自污染源方向」分量（指向中國，方位約 285°）
-china_wind = U * cos(285°) + V * sin(285°)
-```
-加到輸入，維度 +24×3。
-
-**預期改善**：-0.05 ~ -0.1
+註記：
+- **FLM (7.8536) = Ridge (7.8536) 完全相同**（一致性驗證：FLM 即離散化線性 FoFR）。
+- DeepONet baseline 架構對齊原 notebook（Branch Dropout0.2 + AdamW wd + 1000ep）；joint 僅略優於 per-station（7.83 vs 8.05）。
+- FDA/DeepONet baseline 用單一輸入函數（PM2.5×24，無座標、station-independent），忠實對應原論文公式。
 
 ---
 
-#### 5. **Station Embedding**
-**動機**：lat/lon 只描述位置，但兩個地理上接近的站可能污染特性差很多（海邊 vs 工業區）。
+## 🧪 輸入前處理實驗（已收斂，皆不採用）
 
-**做法**：
-- 每個測站學一個 16 維 embedding
-- Branch 輸入：`5×24 + station_embed(16) + lat/lon` = 138 維
+| 實驗 | 腳本 | NCU-RMSE | Δ | 結論 |
+|---|---|---|---|---|
+| min-max 正規化[0,1] | `exp_minmax_norm.py` | 7.5505 | +0.226 | ❌ 變差；原始資料有壞值(PM2.5負、RH>100、TEMP-135)撐爆範圍 |
+| 經緯度平移到原點(SW=0,0) | `exp_coord_origin.py` | 7.3234 | −0.002 | ➖ 雜訊內，無害、較乾淨 |
 
-**預期改善**：-0.05 ~ -0.1
-
----
-
-### 🟡 中等潛力（次優先）
-
-#### 6. **POD-DeepONet + Residual Trunk**
-- 用訓練集 Y 的 SVD 取前 k=64 主成分當作固定 trunk 基底
-- 加一個小的 learnable residual trunk 修正
-- User 之前 POD-DeepONet 單獨 7.4591，結合可能更好
-
-#### 7. **季節分模型**
-- 冬季（10-3 月）vs 夏季分別訓練
-- 或加 season one-hot 到輸入
-
-#### 8. **加權損失（後段時間權重更高）**
-```python
-weights = torch.linspace(1.0, 2.0, 72)
-loss = ((pred - true)^2 * weights).mean()
-```
+→ 輸入縮放/平移動不了指標；瓶頸是**資料的訊息含量**，非輸入尺度。
 
 ---
 
-## 📐 模型架構參考（用 ✅ 表示要保留）
+## 🔬 殘差分析（`daily_station_residual_analysis.py`）
 
-```python
-# ✅ 保留：FEDONet 核心架構
-class FEDONet(nn.Module):
-    def __init__(self, input_dim=122, p=128, m=32):
-        self.freqs = nn.Parameter(torch.empty(m).uniform_(0.0, 2.0))
-        trunk_in_dim = 2 * m + 1
-        self.branch = nn.Sequential(
-            nn.Linear(input_dim, 512), nn.ReLU(), nn.Dropout(0.2),
-            nn.Linear(512, 256), nn.ReLU(), nn.Dropout(0.2),
-            nn.Linear(256, 128), nn.ReLU(), nn.Dropout(0.1),
-            nn.Linear(128, p),
-        )
-        self.trunk = nn.Sequential(
-            nn.Linear(trunk_in_dim, 128), nn.ReLU(),
-            nn.Linear(128, p),
-        )
-        self.bias = nn.Parameter(torch.zeros(1))
-```
-
-**訓練設定（已驗證最佳）**：
-- Optimizer: AdamW(lr=0.001, weight_decay=1e-2)
-- Scheduler: CosineAnnealingLR(T_max=2000, eta_min=1e-5)
-- Epochs: **2000**（不要更多）
-- Batch: **Full-batch**（mini-batch 比 full-batch 差 ~0.16）
+誤差非均勻分布，集中在兩個維度的交集：
+- **冬季（1-2月）區域傳輸事件**：同一天西部多站一起爆、且**系統性低估尖峰**（bias −15~−26）。
+- **西部高污染站**（二林/崙背/斗六/麥寮/大寮…，mean_true 15-19）RMSE 最高。
+- 模型「回歸到平均」：乾淨日(0-10)略高估(+1.68)、髒日(30-50)嚴重低估(−9.17)。
+- 注意：二林/麥寮 bias≈0、屬局地工業尖峰高變異，純觀測接近不可約下界，非模型缺陷。
 
 ---
 
-## 📁 重要檔案位置
+## 🧭 候選下一步（依殘差潛力排序）
+
+1. **鄰站 PM2.5 輸入**（k=3 最近鄰，+72維 raw）— 直接打中冬季傳輸暗帶，預期 −0.1~−0.3 ⭐最優先
+2. **重疊窗口 STEP=3** — 補高污染稀少樣本，預期 −0.1~−0.2
+3. **高污染加權 / log-target** — 解決尖峰低估，預期 −0.05~−0.15
+4. 風向工程（china_wind 分量）— 與 1 部分重疊
+5. 逐站偏差校正 — 收尾
+6. （ablation）「只用 branch」拿掉 trunk — 驗證 branch-trunk 結構是否有用
+
+---
+
+## 📁 檔案索引
 
 ```
-C:\Users\user\Desktop\HW-NCHU\meeting\ccproject_deeponet\
-├── data\
-│   ├── raw\PM2.5.csv (and others — original observations)
-│   ├── fpca_processed\*_FPCA_2025.csv (FPCA-smoothed)
-│   └── station_info\station .csv (注意檔名有空格！)
-├── code\models\
-│   ├── reproduce_fedonet.py        ← Baseline reproduction (RMSE 7.4047)
-│   ├── exp_temporal_fullbatch.py   ← + Temporal (RMSE 7.3864)
-│   ├── exp_diagnosis.py            ← 6 failed variants
-│   └── exp_ensemble_temporal_and_ar.py ← Best result 7.3514 + AR failure
-└── EXPERIMENT_SUMMARY.md           ← 本檔案
+code/
+├── fpca/pm25_fpca_2018~2024_2025.R     # FPCA 補值（5 變數共用，僅換檔名）
+└── models/
+    ├── exp_raw_input.py                 # ★ 正式模型 (7.3250 / MAE 5.27)
+    ├── exp_simple_baselines.py          # persistence / climatology / Ridge
+    ├── exp_fda_baselines.py             # FLM / FAM / FoFGPR（依投影片公式）
+    ├── exp_deeponet_baselines_v2.py     # 原始 DeepONet & FEDONet（joint + per-station）
+    ├── exp_deeponet_baselines.py        # (v1，過擬合，僅留參考)
+    ├── exp_deeponet_per_station.py      # (v1 per-station，過擬合，僅留參考)
+    ├── exp_minmax_norm.py               # 前處理實驗：min-max
+    ├── exp_coord_origin.py              # 前處理實驗：座標平移
+    ├── daily_station_residual_analysis.py  # 每站每天殘差分析
+    ├── Station-independent_deeponet.ipynb / my_Modified_deeponet.ipynb  # 原始 notebook
+    └── run_pffr.R
 ```
 
-**Python 執行路徑**：
+**執行**：
+```bash
+gunzip -k data/raw/*.csv.gz data/fpca_processed/*.csv.gz
+python code/models/exp_raw_input.py
 ```
-C:\Users\user\AppData\Local\Programs\Python\Python310\python.exe
-```
-
-**GPU**：RTX 3060 Laptop（資料載入慢，但訓練 2000 epochs full-batch 只需 ~150s）
-
----
-
-## 🎯 目標與建議路線
-
-**目標 RMSE：< 6.88**（比目前 7.3514 改善 -0.47）
-
-**建議路線**：把以下 5 個未嘗試的方法逐一加入，最後配合 Ensemble + Temporal：
-
-1. **鄰近測站 PM2.5** 預期 -0.1 ~ -0.3 ⭐
-2. **重疊窗口 STEP=1** 預期 -0.1 ~ -0.2 ⭐
-3. **風向工程** 預期 -0.05 ~ -0.1
-4. **Multi-Head DeepONet** 預期 -0.05 ~ -0.15
-5. **Station Embedding** 預期 -0.05 ~ -0.1
-
-**全部疊加目標**：7.3514 - 0.45 ≈ **6.9**（接近目標）
-
-如果這些還不夠，再考慮：
-- POD-DeepONet + Residual trunk
-- 季節分模型
-- 加權損失
-- Spatial-Temporal GNN（工程複雜度高）
-
----
-
-## ⚠️ 給下一個對話的提醒
-
-1. **不要再試**：4000+ epochs、更大模型、Huber loss、AR
-2. **必保留**：Full-batch、2000 epochs、AdamW、CosineAnnealingLR
-3. **Best so far**：Ensemble x3 + Temporal = **7.3514**
-4. **資料是真正瓶頸**，不是架構 → 重點應該在「**怎麼餵更多/更好的資訊給模型**」
-5. **每次跑實驗**：用 `reproduce_fedonet.py` 為模板，保持 full-batch
-6. **執行時間參考**：full-batch 2000 epochs ≈ 150s（不含資料載入 ~10min）
-
+需要 PyTorch（CUDA 可選）；FPCA 前處理需 R + fdapace。

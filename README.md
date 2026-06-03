@@ -112,7 +112,7 @@ conditioning**, not from the operator architecture itself (FLM ≡ Ridge ≡ Dee
 ≈ 7.85 on single PM2.5 input).
 
 Full details, ablations, residual analysis, and the methodology/leakage audit:
-**`NEW_EXPERIMENTS_LOG.md`** (and `EXPERIMENT_SUMMARY.md`).
+**`EXPERIMENT_SUMMARY.md`**.
 
 ---
 
