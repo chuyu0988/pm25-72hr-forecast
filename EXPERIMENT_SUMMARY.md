@@ -12,7 +12,7 @@
   - 該 CNN 把 **WRF-CMAQ 物理預報**當核心輸入（CMAQ 系統單獨 RMSE=10.48，CNN 結合 CMAQ+觀測才到 6.88）。
   - 測試集不同：論文 75 站、2019/10–2021/09；本專案 71 站、2025。
   - 論文丟棄缺值樣本、輸入 min-max[0,1]。
-  - → 本專案是**純觀測**達到 **7.3250**，逼近「用了 CMAQ」的 6.88。算法可比、資訊條件不對等。**「純觀測、不需數值模式」本身是賣點。**
+  - → 本專案是**純觀測**達到 **7.2931**，逼近「用了 CMAQ」的 6.88。算法可比、資訊條件不對等。**「純觀測、不需數值模式」本身是賣點。**
 
 ---
 
@@ -41,7 +41,7 @@
 - 訓練目標：raw 為主、缺值用 FPCA 補（僅 1.30% 目標格用 FPCA）。
 - 測試目標：**純 raw 觀測**（不補 FPCA，缺值不計分）→ 誠實評估。
 
-**訓練設定（已驗證最佳）**：AdamW(lr=1e-3, wd=1e-2)、CosineAnnealingLR(T_max=2000)、MSE、full-batch、2000 epochs、seed=42。模型＝FEDONet + station embedding(32d) + temporal(month/weekday 4d) + m=64。
+**訓練設定（已驗證最佳）**：AdamW(lr=1e-3, wd=1e-2)、CosineAnnealingLR(T_max=2000)、MSE、full-batch、2000 epochs、seed=42。模型＝FEDONet + station embedding(32d) + temporal(**month 2d**；weekday 經多 seed 驗證後拿掉) + m=64。
 
 **紀律**：一次只改一個變因；改善 <±0.02 視為雜訊；每實驗記錄腳本/RMSE/MAE/分時段/結論。
 
@@ -56,7 +56,7 @@
 - **一天一條曲線**，當日補值只用當日 24h（發布時當日已全觀測）→ 無 look-ahead。
 - `FVEthreshold=0.999` → 幾乎只補值、不平滑。
 - **補值對齊已實測**：raw 與 FPCA CSV 在觀測點上相關 0.94–0.98、均值吻合 → 對齊正確（曾疑慮的 SubjectID 錯位未發生）。
-- **測試目標純 raw**（不碰 FPCA）→ 7.3250 為誠實指標。
+- **測試目標純 raw**（不碰 FPCA）→ 最佳 7.2931 為誠實指標。
 - 已知小瑕疵：train/test 邊界缺 purge gap，最後一個訓練窗 label 落在 2025-01-01~03（影響前 ~3 天，量級可忽略，未修）。
 
 ### FPCA 重建誤差（各變數）— `exp_fpca_recon_error.py`
@@ -105,9 +105,9 @@
 | operator | DeepONet — per-station（71模型）| `exp_deeponet_baselines_v2.py` | 8.05 | 5.82 |
 | operator | DeepONet — joint（Lu 2021）| `exp_deeponet_baselines_v2.py` | 7.83 | 5.75 |
 | operator | FEDONet — joint（Sojitra 2025, 固定 Fourier trunk）| `exp_deeponet_baselines_v2.py` | 7.81 | 5.74 |
-| **本模型** | conditioned multi-input FEDONet | `exp_raw_input.py` | **7.3250** | **5.27** |
+| **本模型** | conditioned multi-input FEDONet (month-only) | `exp_best.py` | **7.2931** | **5.25** |
 
-**核心結論**：所有「PM2.5 單變數」方法——線性(Ridge/FLM)、非線性FDA(FAM)、GP(FoFGPR)、各種 DeepONet/FEDONet——全部卡在 **7.8–8.2 高原**。突破到 7.33 來自**多變數輸入 + station 條件化**，不是 operator 架構本身（FLM ≡ Ridge ≡ DeepONet ≈ 7.85）。
+**核心結論**：所有「PM2.5 單變數」方法——線性(Ridge/FLM)、非線性FDA(FAM)、GP(FoFGPR)、各種 DeepONet/FEDONet——全部卡在 **7.8–8.2 高原**。突破到 ~7.29 來自**多變數輸入 + station 條件化**，不是 operator 架構本身（FLM ≡ Ridge ≡ DeepONet ≈ 7.85）。
 
 註記：
 - **FLM (7.8536) = Ridge (7.8536) 完全相同**（一致性驗證：FLM 即離散化線性 FoFR）。
@@ -195,6 +195,6 @@ code/
 **執行**：
 ```bash
 gunzip -k data/raw/*.csv.gz data/fpca_processed/*.csv.gz
-python code/models/exp_raw_input.py
+python code/models/exp_best.py
 ```
 需要 PyTorch（CUDA 可選）；FPCA 前處理需 R + fdapace。

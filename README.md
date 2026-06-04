@@ -3,8 +3,8 @@
 DeepONet-based **72-hour PM2.5 forecasting** for Taiwan air-quality monitoring
 stations (71 stations, pure observational data — no CMAQ simulation).
 
-This repo contains the **data**, the **FPCA imputation method**, and the
-**methodologically-corrected baseline model** for reproducing the results.
+This repo contains the **data**, the **FPCA imputation method**, the **best model**,
+and a full set of comparable **baselines** for reproducing the results.
 
 ---
 
@@ -88,7 +88,7 @@ ingredient) + a month seasonal feature.
 
 ---
 
-## 4b. Baselines & comparison (`code/models/`, `NEW_EXPERIMENTS_LOG.md`)
+## 4b. Baselines & comparison (`code/models/`, see `EXPERIMENT_SUMMARY.md`)
 
 All baselines run on the **identical** 71-station / 23,189-window test set with the
 same NCU-style metric, so they are directly comparable.
@@ -108,7 +108,7 @@ same NCU-style metric, so they are directly comparable.
 
 **Takeaway.** Every *single-PM2.5-input* method — linear (Ridge/FLM), nonlinear FDA
 (FAM), Gaussian process (FoFGPR), and the vanilla/Fourier DeepONets — plateaus at
-**7.8–8.2**. The gain to 7.33 comes from **multi-variable input + station
+**7.8–8.2**. The gain to ~7.29 comes from **multi-variable input + station
 conditioning**, not from the operator architecture itself (FLM ≡ Ridge ≡ DeepONet
 ≈ 7.85 on single PM2.5 input).
 
