@@ -33,8 +33,10 @@ data/
 │   ├── PM2.5.csv.gz
 │   ├── WIND_U.csv.gz  WIND_V.csv.gz
 │   ├── RH.csv.gz      AMB_TEMP.csv.gz
-├── fpca_processed/       # FPCA-reconstructed series (used to fill missing cells)
-│   └── *_FPCA_2025.csv.gz
+├── fpca_processed/       # FPCA-reconstructed series, one per variable (fills missing cells)
+│   ├── PM2.5_FPCA_2025.csv.gz
+│   ├── WIND_U_FPCA_2025.csv.gz  WIND_V_FPCA_2025.csv.gz
+│   ├── RH_FPCA_2025.csv.gz      AMB_TEMP_FPCA_2025.csv.gz
 └── station_info/
     └── station .csv      # station coordinates (note: filename has a space)
 ```
