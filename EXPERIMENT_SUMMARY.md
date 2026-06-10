@@ -146,6 +146,12 @@
 - **bias b₀**：純量、與時空無關（同 Lu 2021 / DeepXDE 官方）。拿掉≈不變（雜訊內）、改 72 維時間 bias 無幫助、POD 式固定 μ_Y(t) 反而差（joint 平均軌跡太平）。維持純量 b₀。
 - **min-max 正規化** +0.23❌（壞值撐爆範圍）、**經緯度平移** ➖雜訊內。
 
+### 架構融合：MIONet 多 branch（`exp_mionet5.py`）
+- **MIONet-5**（每變數一 branch + context branch，Hadamard 逐元素積融合；其餘同 exp_best）：**NCU-RMSE 7.5188、MAE 5.3482（+0.2257 ❌ 明顯變差）**。分時段全差，短程 1-12hr 最嚴重（6.60 vs 5.87，+0.73）。
+- 訓練 loss 全程比 exp_best 高 ~5–10（優化困難的直接證據）。
+- **原因**：Hadamard 積是**乘性**融合，要求所有 branch 同時非零才有輸出，任一變數 branch→0 即拉垮乘積；而 PM2.5 的最強預測子是「過去 24h PM2.5 自相關」（**加性/線性**主導），乘性結構把自相關訊號稀釋掉。MIONet 原設計給「異質 Banach 空間、本質乘性耦合」的輸入（如 PDE source×boundary），不適合本問題的同空間協變數。
+- → **負面結果**：concat 單 branch（加性融合）優於 MIONet 乘性融合，佐證 `exp_best` 的架構選擇。
+
 ### Loss（評估仍標準 NCU-RMSE）
 - 換 loss 無法在不犧牲整體下改善高值：MAE/Huber/LogCosh 讓高值更差；**Pinball（非對稱）可救高值低估但整體 RMSE 升**（trade-off，旋鈕=τ）；MSE 整體最佳。
 - 加權 loss（freq/threshold/quad，仿 SOTA Eq.4）同理：高值改善、整體略升。
@@ -163,6 +169,20 @@
 ### 重疊窗口 STEP=3（潛力，**尚未採用、待多 seed 驗證**）
 - STEP=24→3（~8 倍訓練樣本），測試固定 STEP=24。小 batch 被 mini-batch 懲罰拖累(7.34)；**大 batch(65536) 逼近 full-batch → NCU-RMSE 7.2633、高值 y≥35 RMSE 22.94→21.80**（單 seed）。
 - 目前唯一「同時改善整體 + 高值」的方向（多事件樣本）；多 seed 驗證通過後再考慮定為新最佳。
+
+### 滾動預測 / 自回歸（AR）＋「完美未來氣象」上限測試（`exp_rolling_*.py`，留本機）
+單步模型 M（exp_best 架構，24h→次 24h），逐日滾動 3 步成 72h。測試集為原集子集（要求未來氣象非缺）：73 槽 embedding／23,161 窗口，與 exp_best 71 站／23,189 幾乎等同（差 28 窗口 <0.12%）。
+
+| 方法 | NCU-RMSE | MAE | day1 | day2 | day3 |
+|---|---|---|---|---|---|
+| 純多變數 AR（PM2.5＋氣象全預測、餵回）`exp_rolling_multivar.py` | 7.7558 | — | 6.9 | 8.1 | 8.3 |
+| **direct exp_best**（一次預測 72h，目前最佳） | **7.2931** | 5.2463 | 6.43 | 7.58 | 7.88 |
+| **作弊滾動**（PM2.5 AR 餵回、**氣象餵真實值**）`exp_rolling_cheat.py` | **7.1665** | 5.0937 | 6.42 | 7.45 | 7.63 |
+
+- **純 AR 更差（+0.46）**：單步模型容量被 5 輸出瓜分（連 day1 都輸），餵回的風/濕/溫誤差逐步惡化 → 證實 **direct multi-horizon 才是對的設計**。
+- **作弊滾動（完美未來氣象）只贏 −0.13（7.29→7.17）**，且增益**全在後段**（day1≈持平 6.42≈6.43、day2 −0.13、day3 **−0.25**）：正是「資訊缺口隨 horizon 變大」的指紋。
+- **關鍵結論**：就算給「上帝視角」的未來氣象，純觀測也只到 7.17、**仍遠不到 6.88**。代表到 SOTA 的剩餘差距主因**不是當地未來天氣**，而是 CMAQ 的**區域化學傳輸/排放模擬**（測站氣象變數表達不出）→ 反向佐證 7.29 是強的、誠實的純觀測結果。
+- 但書：作弊版仍混入 PM2.5 自回歸的累積誤差，吃掉部分氣象紅利，故 −0.13 是「完美天氣預報價值」的**保守下界**；乾淨上限需 direct 72h 模型直接吃未來氣象（未做）。
 
 ---
 
@@ -188,7 +208,8 @@ code/
     ├── exp_simple_baselines.py          # persistence / climatology / Ridge
     ├── exp_fda_baselines.py             # FLM / FAM / FoFGPR（依投影片公式）
     ├── exp_deeponet_baselines_v2.py     # 原始 DeepONet & FEDONet（joint + per-station）
-    └── exp_fpca_recon_error.py          # FPCA 各變數重建誤差診斷
+    ├── exp_fpca_recon_error.py          # FPCA 各變數重建誤差診斷
+    └── exp_mionet5.py                   # MIONet-5 (Hadamard 融合; 7.5188，負面結果)
 ```
 > 表格以外的探索性腳本（前處理、位置 ablation、殘差分析、v1 過擬合版、原始 notebook 等）僅保留於本機，未納入此 repo。
 
